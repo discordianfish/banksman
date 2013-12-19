@@ -16,6 +16,7 @@ const (
 	ipxeRoot           = "/ipxe/"
 	staticRoot         = "/static/"
 	configRegistration = `#!ipxe
+dhcp
 kernel %s
 initrd %s
 boot`
