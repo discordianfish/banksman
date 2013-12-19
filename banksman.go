@@ -1,4 +1,5 @@
 package main
+
 // http://en.wikipedia.org/wiki/Banksman
 
 import (
@@ -12,15 +13,23 @@ import (
 )
 
 const (
-	configRegistration = `#!ipxe`
+	ipxeRoot           = "/ipxe/"
+	staticRoot         = "/static/"
+	configRegistration = `#!ipxe
+kernel %s
+initrd %s
+boot`
 )
 
 var (
 	collins  = &http.Client{}
-	listen   = flag.String("listen", ":8080", "adress to listen on")
+	listen   = flag.String("listen", "127.0.0.1:8080", "adress to listen on")
 	uri      = flag.String("uri", "http://localhost:9000/api", "url to collins api")
 	user     = flag.String("user", "blake", "collins user")
 	password = flag.String("password", "admin:first", "collins password")
+	static   = flag.String("static", "static", "path will be served at /static")
+	kernel   = flag.String("kernel", "http://"+*listen+staticRoot, "path to registration kernel")
+	initrd   = flag.String("initrd", "http://"+*listen+staticRoot, "path to registration initrd")
 )
 
 type collinsAssetState struct {
@@ -105,7 +114,7 @@ func handleError(w http.ResponseWriter, errStr string, name string) {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	name := r.URL.Path[1:]
+	name := r.URL.Path[len(ipxeRoot):]
 	log.Printf("< %s", r.URL)
 	asset, err := getAsset(name)
 	if err != nil {
@@ -114,7 +123,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if asset == nil {
-		fmt.Fprintf(w, configRegistration)
+		fmt.Fprintf(w, fmt.Sprintf(configRegistration, *kernel, *initrd))
 		return
 	}
 
@@ -150,7 +159,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	flag.Parse()
-	http.HandleFunc("/", handler)
+	http.HandleFunc(ipxeRoot, handler)
+	http.Handle(staticRoot, http.StripPrefix(staticRoot, http.FileServer(http.Dir(*static))))
 	log.Printf("Listening on %s", *listen)
 	log.Fatal(http.ListenAndServe(*listen, nil))
 }
