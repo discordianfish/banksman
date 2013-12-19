@@ -28,8 +28,8 @@ var (
 	user     = flag.String("user", "blake", "collins user")
 	password = flag.String("password", "admin:first", "collins password")
 	static   = flag.String("static", "static", "path will be served at /static")
-	kernel   = flag.String("kernel", "http://"+*listen+staticRoot, "path to registration kernel")
-	initrd   = flag.String("initrd", "http://"+*listen+staticRoot, "path to registration initrd")
+	kernel   = flag.String("kernel", "http://"+*listen+staticRoot+"/kernel", "path to registration kernel")
+	initrd   = flag.String("initrd", "http://"+*listen+staticRoot+"/initrd.gz", "path to registration initrd")
 )
 
 type collinsAssetState struct {
