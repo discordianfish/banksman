@@ -17,9 +17,10 @@ const (
 	staticRoot         = "/static/"
 	configRegistration = `#!ipxe
 dhcp
-kernel %s
+kernel %s collins_url=%s collins_user=%s collins_password=%s collins_serial=%s
 initrd %s
-boot`
+boot  || 
+shell`
 )
 
 var (
@@ -124,7 +125,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if asset == nil {
-		fmt.Fprintf(w, fmt.Sprintf(configRegistration, *kernel, *initrd))
+		fmt.Fprintf(w, fmt.Sprintf(configRegistration, *kernel, *uri, *user, *password, name, *initrd))
 		return
 	}
 
