@@ -1,14 +1,25 @@
 # banksman
 
-banksman will render a configuration provided by [Collins](http://tumblr.github.io/collins/)
-if the node in question is in the status "Provisioning"
+banksman will render a configuration provided by [Collins](http://tumblr.github.io/collins/).
 
-## TODO
-- Add registration ipxe config
-- Serve initrds
-- (maybe) provide preseed for debian and ubuntu based installs
+- If the node in question is in the status "Provisioning", it will return a config specified by "IPXE_CONFIG_NAME"
+- If the node is unknown, it will return a config booting kernel and initrd given at command line.
+
+
+## Usage
+
+    Usage of ./banksman:
+      -initrd="http://127.0.0.1:8080/static/": path to registration initrd
+      -kernel="http://127.0.0.1:8080/static/": path to registration kernel
+      -listen="127.0.0.1:8080": adress to listen on
+      -password="admin:first": collins password
+      -static="static": path will be served at /static
+      -uri="http://localhost:9000/api": url to collins api
+      -user="blake": collins user
+
 
 ## Quick start
+
 First you need to create a configuration asset in collins. Then you
 need to set the IPXE_CONFIG attribute to iPXE configuration:
 
