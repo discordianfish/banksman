@@ -39,3 +39,7 @@ Now you can assign this configuration asset to any server asset like this:
 
 Now you just need to point the dhcp pxe filename to `http://your-system/${serial}`
 and iPXE will boot whatever config collins provides
+
+## TODO
+
+- Provide installer configuration/preseed files based on collins attributes.
