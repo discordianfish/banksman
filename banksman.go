@@ -19,8 +19,7 @@ const (
 dhcp
 kernel %s collins_url=%s collins_user=%s collins_password=%s collins_serial=%s
 initrd %s
-boot  || 
-shell`
+boot || shell`
 )
 
 var (
