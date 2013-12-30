@@ -10,10 +10,12 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"text/template"
 )
 
 const (
 	ipxeRoot           = "/ipxe/"
+	configRoot         = "/config/"
 	staticRoot         = "/static/"
 	configRegistration = `#!ipxe
 dhcp
@@ -32,7 +34,7 @@ var (
 	kernel   = flag.String("kernel", "http://"+*listen+staticRoot+"/kernel", "path to registration kernel")
 	initrd   = flag.String("initrd", "http://"+*listen+staticRoot+"/initrd.gz", "path to registration initrd")
 
-	registerStates = []string{"Maintenance", "Decommissioned"}
+	registerStates = []string{"Maintenance", "Decommissioned", "Incomplete"}
 )
 
 type collinsAssetState struct {
@@ -132,7 +134,40 @@ func isInstallState(asset *collinsAsset) bool {
 	return asset.Data.Asset.Status == "Provisioning"
 }
 
-func handler(w http.ResponseWriter, r *http.Request) {
+func getConfig(asset *collinsAsset) (*collinsAsset, error) {
+	name := asset.Data.Attributes["0"]["PRIMARY_ROLE"]
+	c, err := getAsset(name)
+	if err != nil {
+		return nil, err
+	}
+	if c == nil {
+		return nil, fmt.Errorf("Configuration asset '%s' not found", name)
+	}
+	return c, nil
+}
+
+func handleConfig(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Path[len(configRoot):]
+	log.Printf("< %s", r.URL)
+	asset, err := getAsset(name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	configAsset, err := getConfig(asset)
+	if err != nil {
+		handleError(w, fmt.Sprintf("Couldn't get config: %s", err), asset.Data.Asset.Tag)
+		return
+	}
+	t, err := template.New("config").Parse(configAsset.Data.Attributes["0"]["CONFIG"])
+	if err != nil {
+		handleError(w, err.Error(), asset.Data.Asset.Tag)
+		return
+	}
+	t.Execute(w, asset)
+}
+
+func handlePxe(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Path[len(ipxeRoot):]
 	log.Printf("< %s", r.URL)
 	asset, err := getAsset(name)
@@ -146,29 +181,12 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, fmt.Sprintf(configRegistration, *kernel, *uri, *user, *password, name, *initrd))
 
 	case isInstallState(asset):
-		ipxeConfigName := asset.Data.Attributes["0"]["IPXE_CONFIG_NAME"]
-		if ipxeConfigName == "" {
-			handleError(w, "Attribute IPXE_CONFIG_NAME missing", asset.Data.Asset.Tag)
-			return
-		}
-
-		configAsset, err := getAsset(ipxeConfigName)
+		configAsset, err := getConfig(asset)
 		if err != nil {
-			handleError(w, fmt.Sprintf("Couldn't get configuration asset '%s'", ipxeConfigName), asset.Data.Asset.Tag)
+			handleError(w, fmt.Sprintf("Couldn't get config: %s", err), asset.Data.Asset.Tag)
 			return
 		}
-		if configAsset == nil {
-			handleError(w, fmt.Sprintf("Couldn't find configuration asset '%s'", ipxeConfigName), asset.Data.Asset.Tag)
-			return
-		}
-
-		ipxeConfig := configAsset.Data.Attributes["0"]["IPXE_CONFIG"]
-		if ipxeConfig == "" {
-			handleError(w, "Attribute IPXE_CONFIG missing", ipxeConfigName)
-			return
-		}
-
-		fmt.Fprintf(w, ipxeConfig)
+		fmt.Fprintf(w, configAsset.Data.Attributes["0"]["IPXE_CONFIG"])
 	default:
 		handleError(w, fmt.Sprintf("Status '%s' not supported", asset.Data.Asset.Status), asset.Data.Asset.Tag)
 	}
@@ -176,7 +194,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	flag.Parse()
-	http.HandleFunc(ipxeRoot, handler)
+	http.HandleFunc(ipxeRoot, handlePxe)
+	http.HandleFunc(configRoot, handleConfig)
 	http.Handle(staticRoot, http.StripPrefix(staticRoot, http.FileServer(http.Dir(*static))))
 	log.Printf("Listening on %s", *listen)
 	log.Fatal(http.ListenAndServe(*listen, nil))
