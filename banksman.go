@@ -31,6 +31,8 @@ var (
 	static   = flag.String("static", "static", "path will be served at /static")
 	kernel   = flag.String("kernel", "http://"+*listen+staticRoot+"/kernel", "path to registration kernel")
 	initrd   = flag.String("initrd", "http://"+*listen+staticRoot+"/initrd.gz", "path to registration initrd")
+
+	registerStates = []string{"Maintenance", "Decommissioned"}
 )
 
 type collinsAssetState struct {
@@ -114,6 +116,22 @@ func handleError(w http.ResponseWriter, errStr string, name string) {
 	http.Error(w, msg, http.StatusInternalServerError)
 }
 
+func isRegisterState(asset *collinsAsset) bool {
+	if asset == nil {
+		return true
+	}
+	for _, status := range registerStates {
+		if asset.Data.Asset.Status == status {
+			return true
+		}
+	}
+	return false
+}
+
+func isInstallState(asset *collinsAsset) bool {
+	return asset.Data.Asset.Status == "Provisioning"
+}
+
 func handler(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Path[len(ipxeRoot):]
 	log.Printf("< %s", r.URL)
@@ -123,13 +141,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if asset == nil {
+	switch {
+	case isRegisterState(asset):
 		fmt.Fprintf(w, fmt.Sprintf(configRegistration, *kernel, *uri, *user, *password, name, *initrd))
-		return
-	}
 
-	switch asset.Data.Asset.Status {
-	case "Provisioning":
+	case isInstallState(asset):
 		ipxeConfigName := asset.Data.Attributes["0"]["IPXE_CONFIG_NAME"]
 		if ipxeConfigName == "" {
 			handleError(w, "Attribute IPXE_CONFIG_NAME missing", asset.Data.Asset.Tag)
