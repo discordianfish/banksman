@@ -37,10 +37,10 @@ var (
 
 type collinsAssetState struct {
 	ID          int    `json:"ID"`
-	Status      string `json:"STATUS"`
+	Status      string `json:"STATUS,omitempty"`
 	Name        string `json:"NAME"`
-	Label       string `json:"LABEL"`
-	Description string `json:"DESCRIPTION"`
+	Label       string `json:"LABEL,omitempty"`
+	Description string `json:"DESCRIPTION,omitempty"`
 }
 
 // incomplete
