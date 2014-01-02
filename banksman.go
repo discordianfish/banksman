@@ -19,7 +19,7 @@ const (
 	staticRoot         = "/static/"
 	configRegistration = `#!ipxe
 dhcp
-kernel %s collins_url=%s collins_user=%s collins_password=%s collins_serial=%s
+kernel %s collins_url=%s collins_user=%s collins_password=%s collins_tag=%s
 initrd %s
 boot || shell`
 )
