@@ -2,8 +2,27 @@
 
 banksman will render a configuration provided by [Collins](http://tumblr.github.io/collins/).
 
-- If the node in question is in the status "Provisioning", it will return a config specified by "IPXE_CONFIG_NAME"
-- If the node is unknown, it will return a config booting kernel and initrd given at command line.
+## Endpoints
+
+### /ipxe/<tag>
+
+If <tag> is in state `Provisioning`, this endpoint looks up a configuration
+asset named like <tag>'s `PRIMARY_ROLE` attribute and return that configuration
+asset's attribute `IPXE_CONFIG`.
+
+If <tag> is in state `Maintenance`, `Decommissioned` or `Incomplete`, it will
+return a ipxe config pointing to `-kernel` and `-initrd`.
+
+
+### /config/<tag>
+
+This endpoint looks up a configuration asset named like <tag>'s `PRIMARY_ROLE`
+attribute and returns that configuration assets's attribute `CONFIG`.
+
+
+### /static
+
+This endpoint serves static files from directory `static/`.
 
 
 ## Usage
@@ -20,26 +39,24 @@ banksman will render a configuration provided by [Collins](http://tumblr.github.
 
 ## Quick start
 
-First you need to create a configuration asset in collins. Then you
-need to set the IPXE_CONFIG attribute to iPXE configuration:
+Given you have a provisioning profile setting up new nodes with primary role
+'Default', you first need to create a configuration asset called 'default'.
+Now you can set it's `IPXE_CONFIG` attribute with something like this:
 
-    collins-shell asset set_attribute --tag=amd64-ubuntu-precise IPXE_CONFIG '#!ipxe 
+		#!ipxe 
     dhcp
-    echo Starting Ubuntu x64 installer for ${hostname}
-    set base-url http://archive.ubuntu.com/ubuntu/dists/lucid/main/installer-amd64/current/images/netboot/ubuntu-installer/amd64
-    kernel ${base-url}/linux
-    initrd ${base-url}/initrd.gz
+    set url http://archive.ubuntu.com/ubuntu/dists/lucid/main/installer-amd64/current/images/netboot/ubuntu-installer/amd64
+    kernel ${url}/linux
+    initrd ${url}/initrd.gz
+		imgargs linux auto=true url=http://${next-server}:8080/config/${serial}
+		boot
 
-*Config based on [this](https://gist.github.com/robinsmidsrod/2214122)*
 
+You can use the `edit.sh` tool for that:
 
-Now you can assign this configuration asset to any server asset like this:
+    ./edit http://blake:admin:first@localhost:9000/api/asset/default IPXE_CONFIG
 
-    collins-shell asset set_attribute IPXE_CONFIG_NAME amd64-ubuntu-precise --tag=ABCDEFG
+You can set the preseed config by setting the `CONFIG` attribute:
 
-Now you just need to point the dhcp pxe filename to `http://your-system/${serial}`
-and iPXE will boot whatever config collins provides
+    ./edit http://blake:admin:first@localhost:9000/api/asset/default CONFIG
 
-## TODO
-
-- Provide installer configuration/preseed files based on collins attributes.
