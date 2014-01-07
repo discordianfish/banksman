@@ -19,7 +19,7 @@ const (
 	staticRoot         = "/static/"
 	configRegistration = `#!ipxe
 dhcp
-kernel %s collins_url=%s collins_user=%s collins_password=%s collins_tag=%s
+kernel %s %s collins_url=%s collins_user=%s collins_password=%s collins_tag=%s
 initrd %s
 boot || shell`
 )
@@ -32,6 +32,7 @@ var (
 	password = flag.String("password", "admin:first", "collins password")
 	static   = flag.String("static", "static", "path will be served at /static")
 	kernel   = flag.String("kernel", "http://"+*listen+staticRoot+"/kernel", "path to registration kernel")
+	kopts    = flag.String("kopts", "BOOTIF=${net0/mac}", "options to pass to the registration kernel")
 	initrd   = flag.String("initrd", "http://"+*listen+staticRoot+"/initrd.gz", "path to registration initrd")
 
 	registerStates = []string{"Maintenance", "Decommissioned", "Incomplete"}
@@ -181,7 +182,7 @@ func handlePxe(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case isRegisterState(asset):
-		fmt.Fprintf(w, fmt.Sprintf(configRegistration, *kernel, *uri, *user, *password, name, *initrd))
+		fmt.Fprintf(w, fmt.Sprintf(configRegistration, *kernel, *kopts, *uri, *user, *password, name, *initrd))
 
 	case isInstallState(asset):
 		configAsset, err := getConfig(asset)
