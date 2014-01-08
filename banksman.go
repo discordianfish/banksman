@@ -30,7 +30,7 @@ var (
 	password = flag.String("password", "admin:first", "collins password")
 	static   = flag.String("static", "static", "path will be served at /static")
 	kernel   = flag.String("kernel", "http://"+*listen+staticRoot+"/kernel", "path to registration kernel")
-	kopts    = flag.String("kopts", "BOOTIF=${net0/mac}", "options to pass to the registration kernel")
+	kopts    = flag.String("kopts", "console=vga console=ttyS1,115200 BOOTIF=${net0/mac}", "options to pass to the registration kernel")
 	initrd   = flag.String("initrd", "http://"+*listen+staticRoot+"/initrd.gz", "path to registration initrd")
 
 	registerStates = []string{"Maintenance", "Decommissioned", "Incomplete"}
