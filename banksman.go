@@ -23,18 +23,28 @@ boot || shell`
 )
 
 var (
-	collins  = &http.Client{}
-	listen   = flag.String("listen", "127.0.0.1:8080", "adress to listen on")
-	uri      = flag.String("uri", "http://localhost:9000/api", "url to collins api")
-	user     = flag.String("user", "blake", "collins user")
-	password = flag.String("password", "admin:first", "collins password")
-	static   = flag.String("static", "static", "path will be served at /static")
-	kernel   = flag.String("kernel", "http://"+*listen+staticRoot+"/kernel", "path to registration kernel")
-	kopts    = flag.String("kopts", "console=vga console=ttyS1,115200 BOOTIF=${net0/mac}", "options to pass to the registration kernel")
-	initrd   = flag.String("initrd", "http://"+*listen+staticRoot+"/initrd.gz", "path to registration initrd")
+	collins     = &http.Client{}
+	listen      = flag.String("listen", "127.0.0.1:8080", "adress to listen on")
+	uri         = flag.String("uri", "http://localhost:9000/api", "url to collins api")
+	user        = flag.String("user", "blake", "collins user")
+	password    = flag.String("password", "admin:first", "collins password")
+	static      = flag.String("static", "static", "path will be served at /static")
+	kernel      = flag.String("kernel", "http://"+*listen+staticRoot+"/kernel", "path to registration kernel")
+	kopts       = flag.String("kopts", "console=vga console=ttyS1,115200 BOOTIF=${net0/mac}", "options to pass to the registration kernel")
+	initrd      = flag.String("initrd", "http://"+*listen+staticRoot+"/initrd.gz", "path to registration initrd")
+	nameservers = flag.String("nameserver", "8.8.8.8 8.8.4.4", "space separated list of dns servers to be used in config endpoint")
+	pool        = flag.String("pool", "MGMT", "use addresses from this pool when rendering config")
 
 	registerStates = []string{"Maintenance", "Decommissioned", "Incomplete"}
 )
+
+type config struct {
+	Nameserver string
+	IpAddress  string
+	Netmask    string
+	Gateway    string
+	Asset      *collinsAsset
+}
 
 type collinsAssetState struct {
 	ID     int `json:"ID"`
@@ -62,8 +72,23 @@ type collinsAsset struct {
 	} `json:"data"`
 }
 
-func getAsset(name string) (*collinsAsset, error) {
-	req, err := http.NewRequest("GET", *uri+"/asset/"+name, nil)
+type collinsAssetAddress struct {
+	ID      int    `json:"ID"`
+	Pool    string `json:"POOL"`
+	Address string `json:"ADDRESS"`
+	Netmask string `json:"NETMASK"`
+	Gateway string `json:"GATEWAY"`
+}
+
+type collinsAssetAddresses struct {
+	Status string `json:"status"`
+	Data   struct {
+		Addresses []collinsAssetAddress
+	}
+}
+
+func get(path string) ([]byte, error) {
+	req, err := http.NewRequest("GET", *uri+path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -86,6 +111,26 @@ func getAsset(name string) (*collinsAsset, error) {
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("Error %d: %s", resp.StatusCode, body)
+	}
+	return body, nil
+}
+
+func getAddresses(name string) (*collinsAssetAddresses, error) {
+	body, err := get("/asset/" + name + "/addresses")
+	if err != nil {
+		return nil, err
+	}
+	adresses := &collinsAssetAddresses{}
+	return adresses, json.Unmarshal(body, &adresses)
+}
+
+func getAsset(name string) (*collinsAsset, error) {
+	if name == "" {
+		return nil, fmt.Errorf("Name required")
+	}
+	body, err := get("/asset/" + name)
+	if err != nil {
+		return nil, err
 	}
 	asset := &collinsAsset{}
 	return asset, json.Unmarshal(body, &asset)
@@ -139,8 +184,20 @@ func isInstallState(asset *collinsAsset) bool {
 	return asset.Data.Asset.Status == "Provisioning"
 }
 
+func findPool(addrs *collinsAssetAddresses) (collinsAssetAddress, error) {
+	for _, addr := range addrs.Data.Addresses {
+		if addr.Pool == *pool {
+			return addr, nil
+		}
+	}
+	return collinsAssetAddress{}, fmt.Errorf("Can't find address from pool %s for asset", *pool)
+}
+
 func getConfig(asset *collinsAsset) (*collinsAsset, error) {
 	name := asset.Data.Attributes["0"]["PRIMARY_ROLE"]
+	if name == "" {
+		return nil, fmt.Errorf("PRIMARY_ROLE not set")
+	}
 	c, err := getAsset(name)
 	if err != nil {
 		return nil, err
@@ -170,7 +227,25 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 		handleError(w, err.Error(), asset.Data.Asset.Tag)
 		return
 	}
-	t.Execute(w, asset)
+	addresses, err := getAddresses(name)
+	if err != nil {
+		handleError(w, err.Error(), asset.Data.Asset.Tag)
+		return
+	}
+
+	address, err := findPool(addresses)
+	if err != nil {
+		handleError(w, err.Error(), asset.Data.Asset.Tag)
+		return
+	}
+	conf := &config{
+		Nameserver: *nameservers,
+		IpAddress:  address.Address,
+		Netmask:    address.Netmask,
+		Gateway:    address.Gateway,
+		Asset:      asset,
+	}
+	t.Execute(w, conf)
 }
 
 func handlePxe(w http.ResponseWriter, r *http.Request) {
