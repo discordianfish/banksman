@@ -1,7 +1,5 @@
 package main
 
-// http://en.wikipedia.org/wiki/Banksman
-
 import (
 	"encoding/json"
 	"flag"
@@ -86,6 +84,9 @@ func getAsset(name string) (*collinsAsset, error) {
 	if err != nil {
 		return nil, err
 	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("Error %d: %s", resp.StatusCode, body)
+	}
 	asset := &collinsAsset{}
 	return asset, json.Unmarshal(body, &asset)
 }
@@ -155,6 +156,7 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 	log.Printf("< %s", r.URL)
 	asset, err := getAsset(name)
 	if err != nil {
+		log.Println(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
