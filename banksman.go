@@ -44,12 +44,13 @@ var (
 )
 
 type config struct {
-	Nameserver string
-	IpAddress  string
-	Netmask    string
-	Gateway    string
-	Asset      *collinsAsset
-	ConfigUrl  string
+	Nameserver  string
+	IpAddress   string
+	Netmask     string
+	Gateway     string
+	Asset       *collinsAsset
+	ConfigUrl   string
+	FinalizeUrl string
 }
 
 type collinsAssetState struct {
@@ -298,12 +299,13 @@ func renderConfig(name, attrName string, w http.ResponseWriter, r *http.Request)
 		return
 	}
 	conf := &config{
-		Nameserver: *nameservers,
-		IpAddress:  address.Address,
-		Netmask:    address.Netmask,
-		Gateway:    address.Gateway,
-		Asset:      asset,
-		ConfigUrl:  fmt.Sprintf("http://%s%s%s", r.Host, configRoot, name),
+		Nameserver:  *nameservers,
+		IpAddress:   address.Address,
+		Netmask:     address.Netmask,
+		Gateway:     address.Gateway,
+		Asset:       asset,
+		ConfigUrl:   fmt.Sprintf("http://%s%s%s", r.Host, configRoot, name),
+		FinalizeUrl: fmt.Sprintf("http://%s%s%s", r.Host, finalizeRoot, name),
 	}
 	if err := t.Execute(w, conf); err != nil {
 		handleError(w, fmt.Sprintf("Couldn't render template: %s", err), asset.Data.Asset.Tag)

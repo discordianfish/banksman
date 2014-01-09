@@ -27,6 +27,8 @@ Following variables are set:
 - Netmask
 - Gateway
 - Asset (the asset object)
+- ConfigUrl: url to config (this) endpoint for this tag
+- FinalizeUrl: url to finalize endpoint for this tag
 
 You can refer to those variables like this:
 
