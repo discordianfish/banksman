@@ -14,10 +14,11 @@ If <tag> is in state `Maintenance`, `Decommissioned` or `Incomplete`, it will
 return a ipxe config pointing to `-kernel` and `-initrd`.
 
 
-### /config/<tag>
+### /config/<tag>(/attribute)
 
 This endpoint looks up a configuration asset named like <tag>'s `PRIMARY_ROLE`
-attribute and takes that configuration assets's attribute `CONFIG` as a template.
+attribute and takes that configuration assets's attribute `CONFIG_<attribute>`
+as a template.
 
 Following variables are set:
 

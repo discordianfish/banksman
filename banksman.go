@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"text/template"
 )
 
@@ -29,9 +30,9 @@ var (
 	user        = flag.String("user", "blake", "collins user")
 	password    = flag.String("password", "admin:first", "collins password")
 	static      = flag.String("static", "static", "path will be served at /static")
-	kernel      = flag.String("kernel", "http://"+*listen+staticRoot+"/kernel", "path to registration kernel")
+	kernel      = flag.String("kernel", "http://"+*listen+staticRoot+"kernel", "path to registration kernel")
 	kopts       = flag.String("kopts", "console=vga console=ttyS1,115200 BOOTIF=${net0/mac}", "options to pass to the registration kernel")
-	initrd      = flag.String("initrd", "http://"+*listen+staticRoot+"/initrd.gz", "path to registration initrd")
+	initrd      = flag.String("initrd", "http://"+*listen+staticRoot+"initrd.gz", "path to registration initrd")
 	nameservers = flag.String("nameserver", "8.8.8.8 8.8.4.4", "space separated list of dns servers to be used in config endpoint")
 	pool        = flag.String("pool", "MGMT", "use addresses from this pool when rendering config")
 
@@ -44,6 +45,7 @@ type config struct {
 	Netmask    string
 	Gateway    string
 	Asset      *collinsAsset
+	ConfigUrl  string
 }
 
 type collinsAssetState struct {
@@ -209,7 +211,13 @@ func getConfig(asset *collinsAsset) (*collinsAsset, error) {
 }
 
 func handleConfig(w http.ResponseWriter, r *http.Request) {
-	name := r.URL.Path[len(configRoot):]
+	parts := strings.Split(r.URL.Path[len(configRoot):], "/")
+	name := parts[0]
+	attrName := "CONFIG"
+	if len(parts) > 1 {
+		attrName = fmt.Sprintf("%s_%s", attrName, strings.ToUpper(parts[1]))
+	}
+
 	log.Printf("< %s", r.URL)
 	asset, err := getAsset(name)
 	if err != nil {
@@ -222,7 +230,11 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 		handleError(w, fmt.Sprintf("Couldn't get config: %s", err), asset.Data.Asset.Tag)
 		return
 	}
-	t, err := template.New("config").Parse(configAsset.Data.Attributes["0"]["CONFIG"])
+	if configAsset.Data.Attributes["0"][attrName] == "" {
+		handleError(w, fmt.Sprintf("Couldn't find attribute %s on %s", attrName, configAsset.Data.Asset.Tag), asset.Data.Asset.Tag)
+		return
+	}
+	t, err := template.New("config").Parse(configAsset.Data.Attributes["0"][attrName])
 	if err != nil {
 		handleError(w, err.Error(), asset.Data.Asset.Tag)
 		return
@@ -244,8 +256,11 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 		Netmask:    address.Netmask,
 		Gateway:    address.Gateway,
 		Asset:      asset,
+		ConfigUrl:  fmt.Sprintf("http://%s%s%s", r.Host, configRoot, name),
 	}
-	t.Execute(w, conf)
+	if err := t.Execute(w, conf); err != nil {
+		handleError(w, fmt.Sprintf("Couldn't render template: %s", err), asset.Data.Asset.Tag)
+	}
 }
 
 func handlePxe(w http.ResponseWriter, r *http.Request) {
