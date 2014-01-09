@@ -41,6 +41,10 @@ expects each asset to have a adress from pool MGMT.
 
 This endpoint serves static files from directory `static/`.
 
+### /finalize/<tag>
+
+This endpoint change <tag>'s bootdev (back) to disk and sets it's status to
+"Provisioned".
 
 ## Usage
 

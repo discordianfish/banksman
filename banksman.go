@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os/exec"
 	"strings"
 	"text/template"
 )
@@ -16,6 +17,7 @@ const (
 	ipxeRoot           = "/ipxe/"
 	configRoot         = "/config/"
 	staticRoot         = "/static/"
+	finalizeRoot       = "/finalize/"
 	configRegistration = `#!ipxe
 dhcp
 kernel %s %s collins_url=%s collins_user=%s collins_password=%s collins_tag=%s
@@ -35,6 +37,8 @@ var (
 	initrd      = flag.String("initrd", "http://"+*listen+staticRoot+"initrd.gz", "path to registration initrd")
 	nameservers = flag.String("nameserver", "8.8.8.8 8.8.4.4", "space separated list of dns servers to be used in config endpoint")
 	pool        = flag.String("pool", "MGMT", "use addresses from this pool when rendering config")
+	ipmitool    = flag.String("ipmitool", "ipmitool", "path to ipmitool")
+	ipmiIntf    = flag.String("ipmiintf", "lanplus", "IPMI interface (ipmitool -I X) to use when switching bootdev")
 
 	registerStates = []string{"Maintenance", "Decommissioned", "Incomplete"}
 )
@@ -59,10 +63,14 @@ type collinsAssetState struct {
 	Description string `json:"DESCRIPTION,omitempty"`
 }
 
+type collinsStatus struct {
+	Status string `json:"status"`
+}
+
 // incomplete
 type collinsAsset struct {
-	Status string `json:"status"`
-	Data   struct {
+	collinsStatus
+	Data struct {
 		Asset struct {
 			ID     int    `json:"ID"`
 			Tag    string `json:"TAG"`
@@ -71,6 +79,11 @@ type collinsAsset struct {
 			Type   string `json:"TYPE"`
 		} `json:"ASSET"`
 		Attributes map[string]map[string]string `json:"ATTRIBS"`
+		IPMI       struct {
+			Address  string `json:"IPMI_ADDRESS"`
+			Username string `json:"IPMI_USERNAME"`
+			Password string `json:"IPMI_PASSWORD"`
+		} `json:"IPMI"`
 	} `json:"data"`
 }
 
@@ -89,8 +102,12 @@ type collinsAssetAddresses struct {
 	}
 }
 
-func get(path string) ([]byte, error) {
-	req, err := http.NewRequest("GET", *uri+path, nil)
+func req(method string, path string, params *url.Values) ([]byte, error) {
+	url := *uri + path
+	if params != nil {
+		url = url + "?" + params.Encode()
+	}
+	req, err := http.NewRequest(method, url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +135,7 @@ func get(path string) ([]byte, error) {
 }
 
 func getAddresses(name string) (*collinsAssetAddresses, error) {
-	body, err := get("/asset/" + name + "/addresses")
+	body, err := req("GET", "/asset/"+name+"/addresses", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +147,7 @@ func getAsset(name string) (*collinsAsset, error) {
 	if name == "" {
 		return nil, fmt.Errorf("Name required")
 	}
-	body, err := get("/asset/" + name)
+	body, err := req("GET", "/asset/"+name, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -210,15 +227,45 @@ func getConfig(asset *collinsAsset) (*collinsAsset, error) {
 	return c, nil
 }
 
-func handleConfig(w http.ResponseWriter, r *http.Request) {
-	parts := strings.Split(r.URL.Path[len(configRoot):], "/")
-	name := parts[0]
-	attrName := "CONFIG"
-	if len(parts) > 1 {
-		attrName = fmt.Sprintf("%s_%s", attrName, strings.ToUpper(parts[1]))
-	}
+func setStatus(name, status, reason string) error {
+	params := &url.Values{}
+	params.Set("status", status)
+	params.Set("reason", reason)
 
-	log.Printf("< %s", r.URL)
+	body, err := req("POST", "/asset/"+name+"/status", params)
+	if err != nil {
+		return err
+	}
+	s := &collinsStatus{}
+	if err := json.Unmarshal(body, &s); err != nil {
+		return fmt.Errorf("Couldn't unmarshal %s: %s", body, err)
+	}
+	if s.Status != "success:ok" {
+		return fmt.Errorf("Couldn't set status to %s", status)
+	}
+	return nil
+}
+
+func ipmi(asset *collinsAsset, commands ...string) error {
+	cmdOpts := []string{
+		"-H", asset.Data.IPMI.Address,
+		"-U", asset.Data.IPMI.Username, "-P", asset.Data.IPMI.Password,
+		"-I", *ipmiIntf,
+	}
+	cmdOpts = append(cmdOpts, commands...)
+
+	log.Printf("exec: %s %v", *ipmitool, cmdOpts)
+	cmd := exec.Command(*ipmitool, cmdOpts...)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("Couldn't execute ipmi command %s: %s",
+			strings.Join(commands, " "), output)
+	}
+	return nil
+}
+
+func renderConfig(name, attrName string, w http.ResponseWriter, r *http.Request) {
 	asset, err := getAsset(name)
 	if err != nil {
 		log.Println(err)
@@ -263,6 +310,39 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func handleFinalize(w http.ResponseWriter, r *http.Request) {
+	log.Printf("< %s", r.URL)
+	name := r.URL.Path[len(finalizeRoot):]
+	asset, err := getAsset(name)
+	if err != nil {
+		log.Println(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := ipmi(asset, "chassis", "bootdev", "disk"); err != nil {
+		handleError(w, fmt.Sprintf("Couldn't set bootdev: %s", err), asset.Data.Asset.Tag)
+		return
+	}
+	if err := setStatus(asset.Data.Asset.Tag, "Provisioned", "Installer finished"); err != nil {
+		handleError(w, fmt.Sprintf("Couldn't set status to Provisioned: %s", err), asset.Data.Asset.Tag)
+		return
+	}
+	fmt.Fprintf(w, "Successfully finalized %s", name)
+	return
+}
+
+func handleConfig(w http.ResponseWriter, r *http.Request) {
+	log.Printf("< %s", r.URL)
+	parts := strings.Split(r.URL.Path[len(configRoot):], "/")
+	name := parts[0]
+	attrName := "CONFIG"
+	if len(parts) > 1 {
+		attrName = fmt.Sprintf("%s_%s", attrName, strings.ToUpper(parts[1]))
+	}
+	renderConfig(name, attrName, w, r)
+	return
+}
+
 func handlePxe(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Path[len(ipxeRoot):]
 	log.Printf("< %s", r.URL)
@@ -292,6 +372,7 @@ func main() {
 	flag.Parse()
 	http.HandleFunc(ipxeRoot, handlePxe)
 	http.HandleFunc(configRoot, handleConfig)
+	http.HandleFunc(finalizeRoot, handleFinalize)
 	http.Handle(staticRoot, http.StripPrefix(staticRoot, http.FileServer(http.Dir(*static))))
 	log.Printf("Listening on %s", *listen)
 	log.Fatal(http.ListenAndServe(*listen, nil))
