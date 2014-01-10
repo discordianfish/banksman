@@ -76,15 +76,15 @@ attribute to something like this:
     set url http://archive.ubuntu.com/ubuntu/dists/precise/main/installer-amd64/current/images/netboot/ubuntu-installer/amd64
     kernel ${url}/linux
     initrd ${url}/initrd.gz
-		imgargs linux auto=true url=http://${next-server}:8080/config/${uuid}
-		boot
+    imgargs linux auto=true url=http://${next-server}:8080/config/${uuid}
+    boot
 
+The easiest way to upload your configs to collins is by using [collins-shell]():
 
-You can use the `edit.sh` tool for that:
+    collins-shell asset set_attribute IPXE_CONFIG "`cat ipxe.cfg`" --tag=default
 
-    ./edit http://blake:admin:first@localhost:9000/api/asset/default IPXE_CONFIG
 
 You can set the preseed config by setting the `CONFIG` attribute:
 
-    ./edit http://blake:admin:first@localhost:9000/api/asset/default CONFIG
+    collins-shell asset set_attribute CONFIG "`cat preseed.cfg`" --tag=default
 
