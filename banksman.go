@@ -1,13 +1,11 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"github.com/discordianfish/go-collins/collins"
 	"log"
 	"net/http"
-	"net/url"
 	"os/exec"
 	"strings"
 	"text/template"
@@ -26,7 +24,7 @@ boot || shell`
 )
 
 var (
-	collins     = &http.Client{}
+	client      *collins.Client
 	listen      = flag.String("listen", "127.0.0.1:8080", "adress to listen on")
 	uri         = flag.String("uri", "http://localhost:9000/api", "url to collins api")
 	user        = flag.String("user", "blake", "collins user")
@@ -48,139 +46,14 @@ type config struct {
 	IpAddress   string
 	Netmask     string
 	Gateway     string
-	Asset       *collinsAsset
+	Asset       *collins.Asset
 	ConfigUrl   string
 	FinalizeUrl string
 }
 
-type collinsAssetState struct {
-	ID     int `json:"ID"`
-	Status struct {
-		Name        string `json:"NAME"`
-		Description string `json:"DESCRIPTION"`
-	} `json:"STATUS,omitempty"`
-	Name        string `json:"NAME"`
-	Label       string `json:"LABEL,omitempty"`
-	Description string `json:"DESCRIPTION,omitempty"`
-}
-
-type collinsStatus struct {
-	Status string `json:"status"`
-}
-
-// incomplete
-type collinsAsset struct {
-	collinsStatus
-	Data struct {
-		Asset struct {
-			ID     int    `json:"ID"`
-			Tag    string `json:"TAG"`
-			State  collinsAssetState
-			Status string `json:"STATUS"`
-			Type   string `json:"TYPE"`
-		} `json:"ASSET"`
-		Attributes map[string]map[string]string `json:"ATTRIBS"`
-		IPMI       struct {
-			Address  string `json:"IPMI_ADDRESS"`
-			Username string `json:"IPMI_USERNAME"`
-			Password string `json:"IPMI_PASSWORD"`
-		} `json:"IPMI"`
-	} `json:"data"`
-}
-
-type collinsAssetAddress struct {
-	ID      int    `json:"ID"`
-	Pool    string `json:"POOL"`
-	Address string `json:"ADDRESS"`
-	Netmask string `json:"NETMASK"`
-	Gateway string `json:"GATEWAY"`
-}
-
-type collinsAssetAddresses struct {
-	Status string `json:"status"`
-	Data   struct {
-		Addresses []collinsAssetAddress
-	}
-}
-
-func req(method string, path string, params *url.Values) ([]byte, error) {
-	url := *uri + path
-	if params != nil {
-		url = url + "?" + params.Encode()
-	}
-	req, err := http.NewRequest(method, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	log.Printf("> %s", req.URL)
-	req.SetBasicAuth(*user, *password)
-
-	resp, err := collins.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, nil
-	}
-
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("Error %d: %s", resp.StatusCode, body)
-	}
-	return body, nil
-}
-
-func getAddresses(name string) (*collinsAssetAddresses, error) {
-	body, err := req("GET", "/asset/"+name+"/addresses", nil)
-	if err != nil {
-		return nil, err
-	}
-	adresses := &collinsAssetAddresses{}
-	return adresses, json.Unmarshal(body, &adresses)
-}
-
-func getAsset(name string) (*collinsAsset, error) {
-	if name == "" {
-		return nil, fmt.Errorf("Name required")
-	}
-	body, err := req("GET", "/asset/"+name, nil)
-	if err != nil {
-		return nil, err
-	}
-	asset := &collinsAsset{}
-	return asset, json.Unmarshal(body, &asset)
-}
-
-func addLog(message, name string) error {
-	v := url.Values{}
-	v.Set("message", message)
-	v.Set("type", "CRITICAL")
-
-	req, err := http.NewRequest("PUT", *uri+"/asset/"+name+"/log?"+v.Encode(), nil)
-	if err != nil {
-		return err
-	}
-	log.Printf("> %s", req.URL)
-	req.SetBasicAuth(*user, *password)
-
-	resp, err := collins.Do(req)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("Status code %d unexpected", resp.StatusCode)
-	}
-	return nil
-}
-
 func handleError(w http.ResponseWriter, errStr string, name string) {
 	msg := fmt.Sprintf("[%s]: %s", name, errStr)
-	err := addLog(msg, name)
+	err := client.AddAssetLog(msg, "CRITICAL", name)
 	if err != nil {
 		msg = fmt.Sprintf("%s. Couldn't log error: %s", msg, err)
 	}
@@ -188,7 +61,7 @@ func handleError(w http.ResponseWriter, errStr string, name string) {
 	http.Error(w, msg, http.StatusInternalServerError)
 }
 
-func isRegisterState(asset *collinsAsset) bool {
+func isRegisterState(asset *collins.Asset) bool {
 	if asset == nil {
 		return true
 	}
@@ -200,25 +73,25 @@ func isRegisterState(asset *collinsAsset) bool {
 	return false
 }
 
-func isInstallState(asset *collinsAsset) bool {
+func isInstallState(asset *collins.Asset) bool {
 	return asset.Data.Asset.Status == "Provisioning"
 }
 
-func findPool(addrs *collinsAssetAddresses) (collinsAssetAddress, error) {
+func findPool(addrs *collins.AssetAddresses) (collins.AssetAddress, error) {
 	for _, addr := range addrs.Data.Addresses {
 		if addr.Pool == *pool {
 			return addr, nil
 		}
 	}
-	return collinsAssetAddress{}, fmt.Errorf("Can't find address from pool %s for asset", *pool)
+	return collins.AssetAddress{}, fmt.Errorf("Can't find address from pool %s for asset", *pool)
 }
 
-func getConfig(asset *collinsAsset) (*collinsAsset, error) {
+func getConfig(asset *collins.Asset) (*collins.Asset, error) {
 	name := asset.Data.Attributes["0"]["PRIMARY_ROLE"]
 	if name == "" {
 		return nil, fmt.Errorf("PRIMARY_ROLE not set")
 	}
-	c, err := getAsset(name)
+	c, err := client.GetAsset(name)
 	if err != nil {
 		return nil, err
 	}
@@ -228,26 +101,7 @@ func getConfig(asset *collinsAsset) (*collinsAsset, error) {
 	return c, nil
 }
 
-func setStatus(name, status, reason string) error {
-	params := &url.Values{}
-	params.Set("status", status)
-	params.Set("reason", reason)
-
-	body, err := req("POST", "/asset/"+name+"/status", params)
-	if err != nil {
-		return err
-	}
-	s := &collinsStatus{}
-	if err := json.Unmarshal(body, &s); err != nil {
-		return fmt.Errorf("Couldn't unmarshal %s: %s", body, err)
-	}
-	if s.Status != "success:ok" {
-		return fmt.Errorf("Couldn't set status to %s", status)
-	}
-	return nil
-}
-
-func ipmi(asset *collinsAsset, commands ...string) error {
+func ipmi(asset *collins.Asset, commands ...string) error {
 	cmdOpts := []string{
 		"-H", asset.Data.IPMI.Address,
 		"-U", asset.Data.IPMI.Username, "-P", asset.Data.IPMI.Password,
@@ -267,7 +121,7 @@ func ipmi(asset *collinsAsset, commands ...string) error {
 }
 
 func renderConfig(name, attrName string, w http.ResponseWriter, r *http.Request) {
-	asset, err := getAsset(name)
+	asset, err := client.GetAsset(name)
 	if err != nil {
 		log.Println(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -287,7 +141,7 @@ func renderConfig(name, attrName string, w http.ResponseWriter, r *http.Request)
 		handleError(w, err.Error(), asset.Data.Asset.Tag)
 		return
 	}
-	addresses, err := getAddresses(name)
+	addresses, err := client.GetAssetAddresses(name)
 	if err != nil {
 		handleError(w, err.Error(), asset.Data.Asset.Tag)
 		return
@@ -315,7 +169,7 @@ func renderConfig(name, attrName string, w http.ResponseWriter, r *http.Request)
 func handleFinalize(w http.ResponseWriter, r *http.Request) {
 	log.Printf("< %s", r.URL)
 	name := r.URL.Path[len(finalizeRoot):]
-	asset, err := getAsset(name)
+	asset, err := client.GetAsset(name)
 	if err != nil {
 		log.Println(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -325,7 +179,7 @@ func handleFinalize(w http.ResponseWriter, r *http.Request) {
 		handleError(w, fmt.Sprintf("Couldn't set bootdev: %s", err), asset.Data.Asset.Tag)
 		return
 	}
-	if err := setStatus(asset.Data.Asset.Tag, "Provisioned", "Installer finished"); err != nil {
+	if err := client.SetStatus(asset.Data.Asset.Tag, "Provisioned", "Installer finished"); err != nil {
 		handleError(w, fmt.Sprintf("Couldn't set status to Provisioned: %s", err), asset.Data.Asset.Tag)
 		return
 	}
@@ -348,7 +202,7 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 func handlePxe(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Path[len(ipxeRoot):]
 	log.Printf("< %s", r.URL)
-	asset, err := getAsset(name)
+	asset, err := client.GetAsset(name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -372,6 +226,7 @@ func handlePxe(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	flag.Parse()
+	client = collins.New(*user, *password, *uri)
 	http.HandleFunc(ipxeRoot, handlePxe)
 	http.HandleFunc(configRoot, handleConfig)
 	http.HandleFunc(finalizeRoot, handleFinalize)
