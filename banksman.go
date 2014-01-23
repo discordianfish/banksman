@@ -34,7 +34,7 @@ var (
 	kopts       = flag.String("kopts", "console=tty0 console=ttyS1,115200 BOOTIF=${net0/mac}", "options to pass to the registration kernel")
 	initrd      = flag.String("initrd", "http://"+*listen+staticRoot+"initrd.gz", "path to registration initrd")
 	nameservers = flag.String("nameserver", "8.8.8.8 8.8.4.4", "space separated list of dns servers to be used in config endpoint")
-	pool        = flag.String("pool", "MGMT", "use addresses from this pool when rendering config")
+	pool        = flag.String("pool", "int", "use addresses from this pool when rendering config")
 	ipmitool    = flag.String("ipmitool", "ipmitool", "path to ipmitool")
 	ipmiIntf    = flag.String("ipmiintf", "lanplus", "IPMI interface (ipmitool -I X) to use when switching bootdev")
 
