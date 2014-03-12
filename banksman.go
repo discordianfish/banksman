@@ -79,7 +79,7 @@ func isInstallState(asset *collins.Asset) bool {
 
 func findPool(addrs *collins.AssetAddresses) (collins.AssetAddress, error) {
 	for _, addr := range addrs.Data.Addresses {
-		if addr.Pool == *pool {
+		if strings.ToLower(addr.Pool) == strings.ToLower(*pool) {
 			return addr, nil
 		}
 	}
