@@ -218,7 +218,7 @@ func handlePxe(w http.ResponseWriter, r *http.Request) {
 			handleError(w, fmt.Sprintf("Couldn't get config: %s", err), asset.Data.Asset.Tag)
 			return
 		}
-		fmt.Fprintf(w, configAsset.Data.Attributes["0"]["IPXE_CONFIG"])
+		fmt.Fprintf(w, configAsset.Data.Attributes["0"]["CONFIG_IPXE"])
 	default:
 		handleError(w, fmt.Sprintf("Status '%s' not supported", asset.Data.Asset.Status), asset.Data.Asset.Tag)
 	}

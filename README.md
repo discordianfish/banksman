@@ -8,7 +8,7 @@ banksman will render a configuration provided by [Collins](http://tumblr.github.
 
 If <tag> is in state `Provisioning`, this endpoint looks up a configuration
 asset named like <tag>'s `PRIMARY_ROLE` attribute and return that configuration
-asset's attribute `IPXE_CONFIG`.
+asset's attribute `CONFIG_IPXE`.
 
 If <tag> is in state `Maintenance`, `Decommissioned` or `Incomplete`, it will
 return a ipxe config pointing to `-kernel` and `-initrd`.
@@ -68,7 +68,7 @@ First you need to create provisioning profile setting up new assets with a
 primary role, let's assume we call it 'default'. Make sure all your assets
 have a address allocated from whatever pool you specified by `-pool`.
 
-Then create a configuration asset called 'default' and set it's `IPXE_CONFIG`
+Then create a configuration asset called 'default' and set it's `CONFIG_IPXE`
 attribute to something like this:
 
 		#!ipxe 
@@ -81,7 +81,7 @@ attribute to something like this:
 
 The easiest way to upload your configs to collins is by using [collins-shell]():
 
-    collins-shell asset set_attribute IPXE_CONFIG "`cat ipxe.cfg`" --tag=default
+    collins-shell asset set_attribute CONFIG_IPXE "`cat ipxe.cfg`" --tag=default
 
 
 You can set the preseed config by setting the `CONFIG` attribute:
