@@ -3,12 +3,13 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/discordianfish/go-collins/collins"
 	"log"
 	"net/http"
 	"os/exec"
 	"strings"
 	"text/template"
+
+	"github.com/discordianfish/go-collins/collins"
 )
 
 const (
@@ -33,7 +34,7 @@ var (
 	kernel      = flag.String("kernel", "http://"+*listen+staticRoot+"kernel", "path to registration kernel")
 	kopts       = flag.String("kopts", "console=tty0 BOOTIF=${netX/mac}", "options to pass to the registration kernel")
 	initrd      = flag.String("initrd", "http://"+*listen+staticRoot+"initrd.gz", "path to registration initrd")
-	nameservers = flag.String("nameserver", "8.8.8.8 8.8.4.4", "space separated list of dns servers to be used in config endpoint")
+	nameservers = flag.String("nameserver", "8.8.8.8,8.8.4.4", "comma separated list of dns servers to be used in config endpoint")
 	pool        = flag.String("pool", "int", "use addresses from this pool when rendering config")
 	ipmitool    = flag.String("ipmitool", "ipmitool", "path to ipmitool")
 	ipmiIntf    = flag.String("ipmiintf", "lanplus", "IPMI interface (ipmitool -I X) to use when switching bootdev")
@@ -42,7 +43,7 @@ var (
 )
 
 type config struct {
-	Nameserver  string
+	Nameserver  []string
 	IpAddress   string
 	Netmask     string
 	Gateway     string
@@ -153,7 +154,7 @@ func renderConfig(name, attrName string, w http.ResponseWriter, r *http.Request)
 		return
 	}
 	conf := &config{
-		Nameserver:  *nameservers,
+		Nameserver:  strings.Split(*nameservers, ","),
 		IpAddress:   address.Address,
 		Netmask:     address.Netmask,
 		Gateway:     address.Gateway,

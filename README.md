@@ -22,7 +22,7 @@ as a template.
 
 Following variables are set:
 
-- Nameserver: equals -nameserver flag
+- Nameserver: list of nameservers specified by -nameserver flag
 - IpAddress
 - Netmask
 - Gateway
@@ -55,7 +55,7 @@ This endpoint change <tag>'s bootdev (back) to disk and sets it's status to
       -kernel="http://127.0.0.1:8080/static//kernel": path to registration kernel
       -kopts="console=vga console=ttyS1,115200 BOOTIF=${net0/mac}": options to pass to the registration kernel
       -listen="127.0.0.1:8080": adress to listen on
-      -nameserver="8.8.8.8 8.8.4.4": space separated list of dns servers to be used in config endpoint
+      -nameserver="8.8.8.8,8.8.4.4": comma separated list of dns servers to be used in config endpoint
       -password="admin:first": collins password
       -pool="MGMT": use addresses from this pool when rendering config
       -static="static": path will be served at /static
