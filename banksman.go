@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/discordianfish/go-collins/collins"
 )
@@ -123,6 +124,7 @@ func ipmi(asset *collins.Asset, commands ...string) error {
 
 func renderConfig(name, attrName string, w http.ResponseWriter, r *http.Request) {
 	asset, err := client.GetAsset(name)
+	time.Sleep(100 * time.Millisecond)
 	if err != nil {
 		log.Println(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
