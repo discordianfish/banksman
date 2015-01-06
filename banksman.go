@@ -9,7 +9,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/discordianfish/go-collins/collins"
+	"github.com/docker-infra/go-collins/collins"
 )
 
 const (
