@@ -54,7 +54,7 @@ type config struct {
 
 func handleError(w http.ResponseWriter, errStr string, name string) {
 	msg := fmt.Sprintf("[%s]: %s", name, errStr)
-	err := client.AddAssetLog(msg, "CRITICAL", name)
+	err := client.AddAssetLog(name, "CRITICAL", msg)
 	if err != nil {
 		msg = fmt.Sprintf("%s. Couldn't log error: %s", msg, err)
 	}
