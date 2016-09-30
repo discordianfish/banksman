@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"text/template"
 
-	"github.com/docker-infra/go-collins/collins"
+	"github.com/discordianfish/banksman/version"
+
+	"github.com/discordianfish/go-collins/collins"
 )
 
 const (
@@ -25,19 +28,20 @@ boot || shell`
 )
 
 var (
-	client      *collins.Client
-	listen      = flag.String("listen", "127.0.0.1:8080", "adress to listen on")
-	uri         = flag.String("uri", "http://localhost:9000/api", "url to collins api")
-	user        = flag.String("user", "blake", "collins user")
-	password    = flag.String("password", "admin:first", "collins password")
-	static      = flag.String("static", "static", "path will be served at /static")
-	kernel      = flag.String("kernel", "http://"+*listen+staticRoot+"kernel", "path to registration kernel")
-	kopts       = flag.String("kopts", "console=tty0 BOOTIF=${netX/mac}", "options to pass to the registration kernel")
-	initrd      = flag.String("initrd", "http://"+*listen+staticRoot+"initrd.gz", "path to registration initrd")
-	nameservers = flag.String("nameserver", "8.8.8.8,8.8.4.4", "comma separated list of dns servers to be used in config endpoint")
-	pool        = flag.String("pool", "int", "use addresses from this pool when rendering config")
-	ipmitool    = flag.String("ipmitool", "ipmitool", "path to ipmitool")
-	ipmiIntf    = flag.String("ipmiintf", "lanplus", "IPMI interface (ipmitool -I X) to use when switching bootdev")
+	client       *collins.Client
+	listen       = flag.String("listen", "127.0.0.1:8080", "adress to listen on")
+	uri          = flag.String("uri", "http://localhost:9000/api", "url to collins api")
+	user         = flag.String("user", "blake", "collins user")
+	password     = flag.String("password", "admin:first", "collins password")
+	static       = flag.String("static", "static", "path will be served at /static")
+	kernel       = flag.String("kernel", "http://"+*listen+staticRoot+"kernel", "path to registration kernel")
+	kopts        = flag.String("kopts", "console=tty0 BOOTIF=${netX/mac}", "options to pass to the registration kernel")
+	initrd       = flag.String("initrd", "http://"+*listen+staticRoot+"initrd.gz", "path to registration initrd")
+	nameservers  = flag.String("nameserver", "8.8.8.8,8.8.4.4", "comma separated list of dns servers to be used in config endpoint")
+	pool         = flag.String("pool", "int", "use addresses from this pool when rendering config")
+	ipmitool     = flag.String("ipmitool", "ipmitool", "path to ipmitool")
+	ipmiIntf     = flag.String("ipmiintf", "lanplus", "IPMI interface (ipmitool -I X) to use when switching bootdev")
+	printVersion = flag.Bool("v", false, "Print version and build info")
 
 	registerStates = []string{"Maintenance", "Decommissioned", "Incomplete"}
 )
@@ -227,11 +231,15 @@ func handlePxe(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	flag.Parse()
+	if *printVersion {
+		log.Printf("banksman %s, revision %s from branch %s built by %s on %s", version.Version, version.Revision, version.Branch, version.BuildUser, version.BuildDate)
+		os.Exit(0)
+	}
 	client = collins.New(*user, *password, *uri)
 	http.HandleFunc(ipxeRoot, handlePxe)
 	http.HandleFunc(configRoot, handleConfig)
 	http.HandleFunc(finalizeRoot, handleFinalize)
 	http.Handle(staticRoot, http.StripPrefix(staticRoot, http.FileServer(http.Dir(*static))))
-	log.Printf("Listening on %s", *listen)
+	log.Printf("banksman %s (rev: %s) on %s", version.Version, version.Revision, *listen)
 	log.Fatal(http.ListenAndServe(*listen, nil))
 }
