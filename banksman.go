@@ -12,7 +12,7 @@ import (
 
 	"github.com/discordianfish/banksman/version"
 
-	"github.com/discordianfish/go-collins/collins"
+	"gopkg.in/tumblr/go-collins.v0/collins"
 )
 
 const (
@@ -56,9 +56,9 @@ type config struct {
 	FinalizeUrl string
 }
 
-func handleError(w http.ResponseWriter, errStr string, name string) {
-	msg := fmt.Sprintf("[%s]: %s", name, errStr)
-	err := client.AddAssetLog(name, "CRITICAL", msg)
+func handleError(w http.ResponseWriter, errStr string, tag string) {
+	msg := fmt.Sprintf("[%s]: %s", tag, errStr)
+	_, _, err := client.Logs.Create(tag, &collins.LogCreateOpts{Message: msg, Type: "CRITICAL"})
 	if err != nil {
 		msg = fmt.Sprintf("%s. Couldn't log error: %s", msg, err)
 	}
@@ -71,7 +71,7 @@ func isRegisterState(asset *collins.Asset) bool {
 		return true
 	}
 	for _, status := range registerStates {
-		if asset.Data.Asset.Status == status {
+		if asset.Metadata.Status == status {
 			return true
 		}
 	}
@@ -79,24 +79,24 @@ func isRegisterState(asset *collins.Asset) bool {
 }
 
 func isInstallState(asset *collins.Asset) bool {
-	return asset.Data.Asset.Status == "Provisioning"
+	return asset.Metadata.Status == "Provisioning"
 }
 
-func findPool(addrs *collins.AssetAddresses) (collins.AssetAddress, error) {
-	for _, addr := range addrs.Data.Addresses {
+func findPool(addrs []collins.Address) (collins.Address, error) {
+	for _, addr := range addrs {
 		if strings.ToLower(addr.Pool) == strings.ToLower(*pool) {
 			return addr, nil
 		}
 	}
-	return collins.AssetAddress{}, fmt.Errorf("Can't find address from pool %s for asset", *pool)
+	return collins.Address{}, fmt.Errorf("Can't find address from pool %s for asset", *pool)
 }
 
 func getConfig(asset *collins.Asset) (*collins.Asset, error) {
-	name := asset.Data.Attributes["0"]["PRIMARY_ROLE"]
+	name := asset.Attributes["0"]["PRIMARY_ROLE"]
 	if name == "" {
 		return nil, fmt.Errorf("PRIMARY_ROLE not set")
 	}
-	c, err := client.GetAsset(name)
+	c, _, err := client.Assets.Get(name)
 	if err != nil {
 		return nil, err
 	}
@@ -108,8 +108,8 @@ func getConfig(asset *collins.Asset) (*collins.Asset, error) {
 
 func ipmi(asset *collins.Asset, commands ...string) error {
 	cmdOpts := []string{
-		"-H", asset.Data.IPMI.Address,
-		"-U", asset.Data.IPMI.Username, "-P", asset.Data.IPMI.Password,
+		"-H", asset.IPMI.Address,
+		"-U", asset.IPMI.Username, "-P", asset.IPMI.Password,
 		"-I", *ipmiIntf,
 	}
 	cmdOpts = append(cmdOpts, commands...)
@@ -126,7 +126,7 @@ func ipmi(asset *collins.Asset, commands ...string) error {
 }
 
 func renderConfig(name, attrName string, w http.ResponseWriter, r *http.Request) {
-	asset, err := client.GetAsset(name)
+	asset, _, err := client.Assets.Get(name)
 	if err != nil {
 		log.Println(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -134,27 +134,22 @@ func renderConfig(name, attrName string, w http.ResponseWriter, r *http.Request)
 	}
 	configAsset, err := getConfig(asset)
 	if err != nil {
-		handleError(w, fmt.Sprintf("Couldn't get config: %s", err), asset.Data.Asset.Tag)
+		handleError(w, fmt.Sprintf("Couldn't get config: %s", err), asset.Metadata.Tag)
 		return
 	}
-	if configAsset.Data.Attributes["0"][attrName] == "" {
-		handleError(w, fmt.Sprintf("Couldn't find attribute %s on %s", attrName, configAsset.Data.Asset.Tag), asset.Data.Asset.Tag)
+	if configAsset.Attributes["0"][attrName] == "" {
+		handleError(w, fmt.Sprintf("Couldn't find attribute %s on %s", attrName, configAsset.Metadata.Tag), asset.Metadata.Tag)
 		return
 	}
-	t, err := template.New("config").Parse(configAsset.Data.Attributes["0"][attrName])
+	t, err := template.New("config").Parse(configAsset.Attributes["0"][attrName])
 	if err != nil {
-		handleError(w, err.Error(), asset.Data.Asset.Tag)
-		return
-	}
-	addresses, err := client.GetAssetAddresses(name)
-	if err != nil {
-		handleError(w, err.Error(), asset.Data.Asset.Tag)
+		handleError(w, err.Error(), asset.Metadata.Tag)
 		return
 	}
 
-	address, err := findPool(addresses)
+	address, err := findPool(asset.Addresses)
 	if err != nil {
-		handleError(w, err.Error(), asset.Data.Asset.Tag)
+		handleError(w, err.Error(), asset.Metadata.Tag)
 		return
 	}
 	conf := &config{
@@ -167,25 +162,25 @@ func renderConfig(name, attrName string, w http.ResponseWriter, r *http.Request)
 		FinalizeUrl: fmt.Sprintf("http://%s%s%s", r.Host, finalizeRoot, name),
 	}
 	if err := t.Execute(w, conf); err != nil {
-		handleError(w, fmt.Sprintf("Couldn't render template: %s", err), asset.Data.Asset.Tag)
+		handleError(w, fmt.Sprintf("Couldn't render template: %s", err), asset.Metadata.Tag)
 	}
 }
 
 func handleFinalize(w http.ResponseWriter, r *http.Request) {
 	log.Printf("< %s", r.URL)
 	name := r.URL.Path[len(finalizeRoot):]
-	asset, err := client.GetAsset(name)
+	asset, _, err := client.Assets.Get(name)
 	if err != nil {
 		log.Println(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if err := ipmi(asset, "chassis", "bootdev", "disk"); err != nil {
-		handleError(w, fmt.Sprintf("Couldn't set bootdev: %s", err), asset.Data.Asset.Tag)
+		handleError(w, fmt.Sprintf("Couldn't set bootdev: %s", err), asset.Metadata.Tag)
 		return
 	}
-	if err := client.SetStatus(asset.Data.Asset.Tag, "Provisioned", "Installer finished"); err != nil {
-		handleError(w, fmt.Sprintf("Couldn't set status to Provisioned: %s", err), asset.Data.Asset.Tag)
+	if _, err := client.Assets.UpdateStatus(asset.Metadata.Tag, &collins.AssetUpdateStatusOpts{Status: "Provisioned", Reason: "Installer finished"}); err != nil {
+		handleError(w, fmt.Sprintf("Couldn't set status to Provisioned: %s", err), asset.Metadata.Tag)
 		return
 	}
 	fmt.Fprintf(w, "Successfully finalized %s", name)
@@ -207,7 +202,7 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 func handlePxe(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Path[len(ipxeRoot):]
 	log.Printf("< %s", r.URL)
-	asset, err := client.GetAsset(name)
+	asset, _, err := client.Assets.Get(name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -220,12 +215,12 @@ func handlePxe(w http.ResponseWriter, r *http.Request) {
 	case isInstallState(asset):
 		configAsset, err := getConfig(asset)
 		if err != nil {
-			handleError(w, fmt.Sprintf("Couldn't get config: %s", err), asset.Data.Asset.Tag)
+			handleError(w, fmt.Sprintf("Couldn't get config: %s", err), asset.Metadata.Tag)
 			return
 		}
-		fmt.Fprintf(w, configAsset.Data.Attributes["0"]["CONFIG_IPXE"])
+		fmt.Fprintf(w, configAsset.Attributes["0"]["CONFIG_IPXE"])
 	default:
-		handleError(w, fmt.Sprintf("Status '%s' not supported", asset.Data.Asset.Status), asset.Data.Asset.Tag)
+		handleError(w, fmt.Sprintf("Status '%s' not supported", asset.Metadata.Status), asset.Metadata.Tag)
 	}
 }
 
@@ -235,7 +230,11 @@ func main() {
 		log.Printf("banksman %s, revision %s from branch %s built by %s on %s", version.Version, version.Revision, version.Branch, version.BuildUser, version.BuildDate)
 		os.Exit(0)
 	}
-	client = collins.New(*user, *password, *uri)
+	var err error
+	client, err = collins.NewClient(*user, *password, *uri)
+	if err != nil {
+		log.Fatal(err)
+	}
 	http.HandleFunc(ipxeRoot, handlePxe)
 	http.HandleFunc(configRoot, handleConfig)
 	http.HandleFunc(finalizeRoot, handleFinalize)
