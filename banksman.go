@@ -16,10 +16,11 @@ import (
 )
 
 const (
-	ipxeRoot           = "/ipxe/"
-	configRoot         = "/config/"
-	staticRoot         = "/static/"
-	finalizeRoot       = "/finalize/"
+	ipxeRoot     = "/ipxe/"
+	configRoot   = "/config/"
+	finalizeRoot = "/finalize/"
+	staticRoot   = "/static/"
+
 	configRegistration = `#!ipxe
 dhcp
 kernel %s %s collins_url=%s collins_user=%s collins_password=%s collins_tag=%s
@@ -55,15 +56,22 @@ type config struct {
 	ConfigURL  string
 	FinalzeURL string
 }
+type handlerFunc func(http.ResponseWriter, *http.Request) (string, error)
 
-func handleError(w http.ResponseWriter, errStr string, tag string) {
-	msg := fmt.Sprintf("[%s]: %s", tag, errStr)
-	_, _, err := client.Logs.Create(tag, &collins.LogCreateOpts{Message: msg, Type: "CRITICAL"})
-	if err != nil {
-		msg = fmt.Sprintf("%s. Couldn't log error: %s", msg, err)
+func errorHandler(f func(http.ResponseWriter, *http.Request) (string, error)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tag, err := f(w, r)
+		if err == nil {
+			return
+		}
+		msg := fmt.Sprintf("[%s]: %s", tag, err.Error())
+		_, _, err = client.Logs.Create(tag, &collins.LogCreateOpts{Message: msg, Type: "CRITICAL"})
+		if err != nil {
+			msg = fmt.Sprintf("%s. Couldn't log error: %s", msg, err)
+		}
+		log.Println(msg)
+		http.Error(w, msg, http.StatusInternalServerError)
 	}
-	log.Println(msg)
-	http.Error(w, msg, http.StatusInternalServerError)
 }
 
 func isRegisterState(asset *collins.Asset) bool {
@@ -125,32 +133,51 @@ func ipmi(asset *collins.Asset, commands ...string) error {
 	return nil
 }
 
-func renderConfig(name, attrName string, w http.ResponseWriter, r *http.Request) {
-	asset, _, err := client.Assets.Get(name)
+func handleFinalize(w http.ResponseWriter, r *http.Request) (string, error) {
+	log.Printf("< %s", r.URL)
+	tag := r.URL.Path[len(finalizeRoot):]
+	asset, _, err := client.Assets.Get(tag)
 	if err != nil {
-		log.Println(err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return tag, err
+	}
+	if err := ipmi(asset, "chassis", "bootdev", "disk"); err != nil {
+		return tag, fmt.Errorf("Couldn't set bootdev: %s", err)
+	}
+	if _, err := client.Assets.UpdateStatus(asset.Metadata.Tag, &collins.AssetUpdateStatusOpts{Status: "Provisioned", Reason: "Installer finished"}); err != nil {
+		return tag, fmt.Errorf("Couldn't set status to Provisioned: %s", err)
+	}
+	fmt.Fprintf(w, "Successfully finalized %s", tag)
+	return tag, nil
+}
+
+func handleConfig(w http.ResponseWriter, r *http.Request) (string, error) {
+	log.Printf("< %s", r.URL)
+	parts := strings.Split(r.URL.Path[len(configRoot):], "/")
+	tag := parts[0]
+	attrName := "CONFIG"
+	if len(parts) > 1 {
+		attrName = fmt.Sprintf("%s_%s", attrName, strings.ToUpper(parts[1]))
+	}
+
+	asset, _, err := client.Assets.Get(tag)
+	if err != nil {
+		return tag, err
 	}
 	configAsset, err := getConfig(asset)
 	if err != nil {
-		handleError(w, fmt.Sprintf("Couldn't get config: %s", err), asset.Metadata.Tag)
-		return
+		return tag, fmt.Errorf("Couldn't get config: %s", err)
 	}
 	if configAsset.Attributes["0"][attrName] == "" {
-		handleError(w, fmt.Sprintf("Couldn't find attribute %s on %s", attrName, configAsset.Metadata.Tag), asset.Metadata.Tag)
-		return
+		return tag, fmt.Errorf("Couldn't find attribute %s on %s", attrName, configAsset.Metadata.Tag)
 	}
-	t, err := template.New("config").Parse(configAsset.Attributes["0"][attrName])
+	tmpl, err := template.New("config").Parse(configAsset.Attributes["0"][attrName])
 	if err != nil {
-		handleError(w, err.Error(), asset.Metadata.Tag)
-		return
+		return tag, err
 	}
 
 	address, err := findPool(asset.Addresses)
 	if err != nil {
-		handleError(w, err.Error(), asset.Metadata.Tag)
-		return
+		return tag, err
 	}
 	conf := &config{
 		Nameserver: strings.Split(*nameservers, ","),
@@ -158,70 +185,32 @@ func renderConfig(name, attrName string, w http.ResponseWriter, r *http.Request)
 		Netmask:    address.Netmask,
 		Gateway:    address.Gateway,
 		Asset:      asset,
-		ConfigURL:  fmt.Sprintf("http://%s%s%s", r.Host, configRoot, name),
-		FinalzeURL: fmt.Sprintf("http://%s%s%s", r.Host, finalizeRoot, name),
+		ConfigURL:  fmt.Sprintf("http://%s%s%s", r.Host, configRoot, tag),
+		FinalzeURL: fmt.Sprintf("http://%s%s%s", r.Host, finalizeRoot, tag),
 	}
-	if err := t.Execute(w, conf); err != nil {
-		handleError(w, fmt.Sprintf("Couldn't render template: %s", err), asset.Metadata.Tag)
-	}
+	return tag, tmpl.Execute(w, conf)
 }
 
-func handleFinalize(w http.ResponseWriter, r *http.Request) {
+func handlePxe(w http.ResponseWriter, r *http.Request) (string, error) {
+	tag := r.URL.Path[len(ipxeRoot):]
 	log.Printf("< %s", r.URL)
-	name := r.URL.Path[len(finalizeRoot):]
-	asset, _, err := client.Assets.Get(name)
+	asset, _, err := client.Assets.Get(tag)
 	if err != nil {
-		log.Println(err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if err := ipmi(asset, "chassis", "bootdev", "disk"); err != nil {
-		handleError(w, fmt.Sprintf("Couldn't set bootdev: %s", err), asset.Metadata.Tag)
-		return
-	}
-	if _, err := client.Assets.UpdateStatus(asset.Metadata.Tag, &collins.AssetUpdateStatusOpts{Status: "Provisioned", Reason: "Installer finished"}); err != nil {
-		handleError(w, fmt.Sprintf("Couldn't set status to Provisioned: %s", err), asset.Metadata.Tag)
-		return
-	}
-	fmt.Fprintf(w, "Successfully finalized %s", name)
-	return
-}
-
-func handleConfig(w http.ResponseWriter, r *http.Request) {
-	log.Printf("< %s", r.URL)
-	parts := strings.Split(r.URL.Path[len(configRoot):], "/")
-	name := parts[0]
-	attrName := "CONFIG"
-	if len(parts) > 1 {
-		attrName = fmt.Sprintf("%s_%s", attrName, strings.ToUpper(parts[1]))
-	}
-	renderConfig(name, attrName, w, r)
-	return
-}
-
-func handlePxe(w http.ResponseWriter, r *http.Request) {
-	name := r.URL.Path[len(ipxeRoot):]
-	log.Printf("< %s", r.URL)
-	asset, _, err := client.Assets.Get(name)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return "", err
 	}
 
 	switch {
 	case isRegisterState(asset):
-		fmt.Fprintf(w, fmt.Sprintf(configRegistration, *kernel, *kopts, *uri, *user, *password, name, *initrd))
+		fmt.Fprintf(w, fmt.Sprintf(configRegistration, *kernel, *kopts, *uri, *user, *password, tag, *initrd))
 
 	case isInstallState(asset):
 		configAsset, err := getConfig(asset)
 		if err != nil {
-			handleError(w, fmt.Sprintf("Couldn't get config: %s", err), asset.Metadata.Tag)
-			return
+			return tag, fmt.Errorf("Couldn't get config: %s", err)
 		}
 		fmt.Fprintf(w, configAsset.Attributes["0"]["CONFIG_IPXE"])
-	default:
-		handleError(w, fmt.Sprintf("Status '%s' not supported", asset.Metadata.Status), asset.Metadata.Tag)
 	}
+	return asset.Metadata.Tag, fmt.Errorf("Satus '%s' not supported", asset.Metadata.Status)
 }
 
 func main() {
@@ -235,10 +224,15 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	http.HandleFunc(ipxeRoot, handlePxe)
-	http.HandleFunc(configRoot, handleConfig)
-	http.HandleFunc(finalizeRoot, handleFinalize)
+	for path, handler := range map[string]handlerFunc{
+		ipxeRoot:     handlePxe,
+		configRoot:   handleConfig,
+		finalizeRoot: handleFinalize,
+	} {
+		http.HandleFunc(path, errorHandler(handler))
+	}
 	http.Handle(staticRoot, http.StripPrefix(staticRoot, http.FileServer(http.Dir(*static))))
+
 	log.Printf("banksman %s (rev: %s) on %s", version.Version, version.Revision, *listen)
 	log.Fatal(http.ListenAndServe(*listen, nil))
 }
