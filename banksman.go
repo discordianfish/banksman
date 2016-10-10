@@ -38,24 +38,24 @@ var (
 	kernel       = flag.String("kernel", "http://"+*listen+staticRoot+"kernel", "path to registration kernel")
 	kopts        = flag.String("kopts", "console=tty0 BOOTIF=${netX/mac}", "options to pass to the registration kernel")
 	initrd       = flag.String("initrd", "http://"+*listen+staticRoot+"initrd.gz", "path to registration initrd")
-	nameservers  = flag.String("nameserver", "8.8.8.8,8.8.4.4", "comma separated list of dns servers to be used in config endpoint")
-	pool         = flag.String("pool", "int", "use addresses from this pool when rendering config")
 	ipmitool     = flag.String("ipmitool", "ipmitool", "path to ipmitool")
 	ipmiIntf     = flag.String("ipmiintf", "lanplus", "IPMI interface (ipmitool -I X) to use when switching bootdev")
 	printVersion = flag.Bool("v", false, "Print version and build info")
 
 	registerStates = []string{"Maintenance", "Decommissioned", "Incomplete"}
+
+	templateFuncs = template.FuncMap{
+		"suffix": strings.HasSuffix,
+		"prefix": strings.HasPrefix,
+	}
 )
 
 type config struct {
-	Nameserver []string
-	IPAddress  string
-	Netmask    string
-	Gateway    string
 	Asset      *collins.Asset
 	ConfigURL  string
 	FinalzeURL string
 }
+
 type handlerFunc func(http.ResponseWriter, *http.Request) (string, error)
 
 func errorHandler(f func(http.ResponseWriter, *http.Request) (string, error)) http.HandlerFunc {
@@ -88,15 +88,6 @@ func isRegisterState(asset *collins.Asset) bool {
 
 func isInstallState(asset *collins.Asset) bool {
 	return asset.Metadata.Status == "Provisioning"
-}
-
-func findPool(addrs []collins.Address) (collins.Address, error) {
-	for _, addr := range addrs {
-		if strings.ToLower(addr.Pool) == strings.ToLower(*pool) {
-			return addr, nil
-		}
-	}
-	return collins.Address{}, fmt.Errorf("Can't find address from pool %s for asset", *pool)
 }
 
 func getConfig(asset *collins.Asset) (*collins.Asset, error) {
@@ -170,20 +161,12 @@ func handleConfig(w http.ResponseWriter, r *http.Request) (string, error) {
 	if configAsset.Attributes["0"][attrName] == "" {
 		return tag, fmt.Errorf("Couldn't find attribute %s on %s", attrName, configAsset.Metadata.Tag)
 	}
-	tmpl, err := template.New("config").Parse(configAsset.Attributes["0"][attrName])
+	tmpl, err := template.New("config").Funcs(templateFuncs).Parse(configAsset.Attributes["0"][attrName])
 	if err != nil {
 		return tag, err
 	}
 
-	address, err := findPool(asset.Addresses)
-	if err != nil {
-		return tag, err
-	}
 	conf := &config{
-		Nameserver: strings.Split(*nameservers, ","),
-		IPAddress:  address.Address,
-		Netmask:    address.Netmask,
-		Gateway:    address.Gateway,
 		Asset:      asset,
 		ConfigURL:  fmt.Sprintf("http://%s%s%s", r.Host, configRoot, tag),
 		FinalzeURL: fmt.Sprintf("http://%s%s%s", r.Host, finalizeRoot, tag),

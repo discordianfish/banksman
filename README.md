@@ -4,7 +4,7 @@ banksman will render a configuration provided by [Collins](http://tumblr.github.
 
 ## Endpoints
 
-### /ipxe/<tag>
+### /ipxe/\<tag\>
 
 If <tag> is in state `Provisioning`, this endpoint looks up a configuration
 asset named like <tag>'s `PRIMARY_ROLE` attribute and return that configuration
@@ -14,7 +14,7 @@ If <tag> is in state `Maintenance`, `Decommissioned` or `Incomplete`, it will
 return a ipxe config pointing to `-kernel` and `-initrd`.
 
 
-### /config/<tag>(/attribute)
+### /config/\<tag\>(/attribute)
 
 This endpoint looks up a configuration asset named like <tag>'s `PRIMARY_ROLE`
 attribute and takes that configuration assets's attribute `CONFIG_<attribute>`
@@ -22,28 +22,40 @@ as a template.
 
 Following variables are set:
 
-- Nameserver: list of nameservers specified by -nameserver flag
-- IpAddress
-- Netmask
-- Gateway
 - Asset (the asset object)
-- ConfigUrl: url to config (this) endpoint for this tag
+- ConfigUrl: url to config endpoint for this tag (this endpoint)
 - FinalizeUrl: url to finalize endpoint for this tag
 
 You can refer to those variables like this:
 
-    d-i netcfg/get_ipaddress string {{.IpAddress}}
+    d-i netcfg/get_hostname string {{index .Asset.Attributes "HOSTNAME"}}
 
-For more complex examples, see http://golang.org/pkg/text/template/
+To select a specific element from array, you can iterate over it and render only
+wanted elements. To allow for sub string matches, the `suffix` and `prefix`
+functions are available:
 
-The command line flag `-pool` selects which pool to use. By default, this
-expects each asset to have a adress from pool MGMT.
+- `suffix string substring` returns true if `string` ends in `substring`
+- `prefix string substring` returns true if `string` starts with `substring`
+
+A common use case is selecting the right asset address to configure the network:
+
+    {{ range .Asset.Addresses }}
+      {{ if prefix .Pool "PROD-" }}
+    d-i netcfg/get_ipaddress string {{.Address}}
+    d-i netcfg/get_netmask string {{.Netmask}}
+    d-i netcfg/get_gateway string {{.Gateway}}
+    d-i netcfg/get_nameservers string 8.8.8.8 8.8.4.4
+    d-i netcfg/confirm_static boolean true
+      {{ end }}
+    {{ end }}
+
+For more details, see http://golang.org/pkg/text/template/
 
 ### /static
 
 This endpoint serves static files from directory `static/`.
 
-### /finalize/<tag>
+### /finalize/\<tag\>
 
 This endpoint change <tag>'s bootdev (back) to disk and sets it's status to
 "Provisioned".
@@ -51,22 +63,33 @@ This endpoint change <tag>'s bootdev (back) to disk and sets it's status to
 ## Usage
 
     Usage of ./banksman:
-      -initrd="http://127.0.0.1:8080/static//initrd.gz": path to registration initrd
-      -kernel="http://127.0.0.1:8080/static//kernel": path to registration kernel
-      -kopts="console=vga console=ttyS1,115200 BOOTIF=${net0/mac}": options to pass to the registration kernel
-      -listen="127.0.0.1:8080": adress to listen on
-      -nameserver="8.8.8.8,8.8.4.4": comma separated list of dns servers to be used in config endpoint
-      -password="admin:first": collins password
-      -pool="MGMT": use addresses from this pool when rendering config
-      -static="static": path will be served at /static
-      -uri="http://localhost:9000/api": url to collins api
-      -user="blake": collins user
+      -initrd string
+            path to registration initrd (default "http://127.0.0.1:8080/static/initrd.gz")
+      -ipmiintf string
+            IPMI interface (ipmitool -I X) to use when switching bootdev (default "lanplus")
+      -ipmitool string
+            path to ipmitool (default "ipmitool")
+      -kernel string
+            path to registration kernel (default "http://127.0.0.1:8080/static/kernel")
+      -kopts string
+            options to pass to the registration kernel (default "console=tty0 BOOTIF=${netX/mac}")
+      -listen string
+            adress to listen on (default "127.0.0.1:8080")
+      -password string
+            collins password (default "admin:first")
+      -static string
+            path will be served at /static (default "static")
+      -uri string
+            url to collins api (default "http://localhost:9000/api")
+      -user string
+            collins user (default "blake")
+      -v    Print version and build info
 
 ## Quick start
 
 First you need to create provisioning profile setting up new assets with a
 primary role, let's assume we call it 'default'. Make sure all your assets
-have a address allocated from whatever pool you specified by `-pool`.
+have a address allocated.
 
 Then create a configuration asset called 'default' and set it's `CONFIG_IPXE`
 attribute to something like this:
@@ -82,7 +105,6 @@ attribute to something like this:
 The easiest way to upload your configs to collins is by using [collins-shell]():
 
     collins-shell asset set_attribute CONFIG_IPXE "`cat ipxe.cfg`" --tag=default
-
 
 You can set the preseed config by setting the `CONFIG` attribute:
 
