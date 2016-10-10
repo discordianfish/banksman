@@ -192,8 +192,11 @@ func handlePxe(w http.ResponseWriter, r *http.Request) (string, error) {
 			return tag, fmt.Errorf("Couldn't get config: %s", err)
 		}
 		fmt.Fprintf(w, configAsset.Attributes["0"]["CONFIG_IPXE"])
+
+	default:
+		return asset.Metadata.Tag, fmt.Errorf("Status '%s' not supported", asset.Metadata.Status)
 	}
-	return asset.Metadata.Tag, fmt.Errorf("Satus '%s' not supported", asset.Metadata.Status)
+	return asset.Metadata.Tag, nil
 }
 
 func main() {
