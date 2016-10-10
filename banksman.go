@@ -51,9 +51,9 @@ var (
 )
 
 type config struct {
-	Asset      *collins.Asset
-	ConfigURL  string
-	FinalzeURL string
+	ConfigURL   string
+	FinalizeURL string
+	Asset       *collins.Asset
 }
 
 type handlerFunc func(http.ResponseWriter, *http.Request) (string, error)
@@ -167,9 +167,9 @@ func handleConfig(w http.ResponseWriter, r *http.Request) (string, error) {
 	}
 
 	conf := &config{
-		Asset:      asset,
-		ConfigURL:  fmt.Sprintf("http://%s%s%s", r.Host, configRoot, tag),
-		FinalzeURL: fmt.Sprintf("http://%s%s%s", r.Host, finalizeRoot, tag),
+		Asset:       asset,
+		ConfigURL:   fmt.Sprintf("http://%s%s%s", r.Host, configRoot, tag),
+		FinalizeURL: fmt.Sprintf("http://%s%s%s", r.Host, finalizeRoot, tag),
 	}
 	return tag, tmpl.Execute(w, conf)
 }
