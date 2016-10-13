@@ -75,9 +75,6 @@ func errorHandler(f func(http.ResponseWriter, *http.Request) (string, error)) ht
 }
 
 func isRegisterState(asset *collins.Asset) bool {
-	if asset == nil {
-		return true
-	}
 	for _, status := range registerStates {
 		if asset.Metadata.Status == status {
 			return true
@@ -177,13 +174,12 @@ func handleConfig(w http.ResponseWriter, r *http.Request) (string, error) {
 func handlePxe(w http.ResponseWriter, r *http.Request) (string, error) {
 	tag := r.URL.Path[len(ipxeRoot):]
 	log.Printf("< %s", r.URL)
-	asset, _, err := client.Assets.Get(tag)
-	if err != nil {
+	asset, resp, err := client.Assets.Get(tag)
+	if err != nil && resp.StatusCode != http.StatusNotFound { // 404 is no error
 		return "", err
 	}
-
 	switch {
-	case isRegisterState(asset):
+	case resp.StatusCode == http.StatusNotFound || isRegisterState(asset):
 		fmt.Fprintf(w, fmt.Sprintf(configRegistration, *kernel, *kopts, *uri, *user, *password, tag, *initrd))
 
 	case isInstallState(asset):
